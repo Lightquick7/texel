@@ -35,10 +35,11 @@
             resize();
 
             // --- PLAYER (BLUE SQUARE) ---
-            const size = 30;
+            const size = 50;
             let x = 100,
                 y = 100;
-            const speed = 5;
+            const keyboardSpeed = 5; // arrow keys
+            const joystickMaxSpeed = 7; // max speed when joystick fully pushed
 
             const keys = {};
             window.addEventListener("keydown", (e) => (keys[e.key] = true));
@@ -49,11 +50,7 @@
                 y = Math.max(0, Math.min(canvas.height - size, y));
             }
 
-            // --- DRAGGING (MOUSE + TOUCH) ---
-            let dragging = false;
-            let dragOffsetX = 0;
-            let dragOffsetY = 0;
-
+            // --- POINTER POSITION (supports CSS scaling) ---
             function getPointerPos(e) {
                 const rect = canvas.getBoundingClientRect();
                 return {
@@ -62,51 +59,68 @@
                 };
             }
 
+            // --- DRAGGING THE SQUARE ---
+            let draggingSquare = false;
+            let dragOffsetX = 0;
+            let dragOffsetY = 0;
+
             function pointInSquare(px, py) {
                 return px >= x && px <= x + size && py >= y && py <= y + size;
             }
-
-            // Allow "grab" if you start near the square (helpful on mobile)
             function nearSquare(px, py) {
                 const cx = x + size / 2;
                 const cy = y + size / 2;
-                const dist = Math.hypot(px - cx, py - cy);
-                return dist <= 70; // grab radius
+                return Math.hypot(px - cx, py - cy) <= 70;
             }
 
-            canvas.addEventListener("pointerdown", (e) => {
-                const { px, py } = getPointerPos(e);
+            // --- JOYSTICK (bottom-left) ---
+            const joy = {
+                active: false,
+                pointerId: null,
+                baseX: 0,
+                baseY: 0,
+                baseR: 52, // base radius
+                knobX: 0,
+                knobY: 0,
+                knobR: 20, // knob radius
+                dx: 0, // normalized -1..1
+                dy: 0, // normalized -1..1
+            };
 
-                if (pointInSquare(px, py) || nearSquare(px, py)) {
-                    dragging = true;
-                    dragOffsetX = px - x;
-                    dragOffsetY = py - y;
-                    canvas.setPointerCapture(e.pointerId);
-                }
-            });
+            function layoutJoystick() {
+                // Place it with padding from bottom-left
+                const pad = 26;
+                joy.baseX = pad + joy.baseR;
+                joy.baseY = canvas.height - (pad + joy.baseR);
+                joy.knobX = joy.baseX;
+                joy.knobY = joy.baseY;
+            }
+            layoutJoystick();
 
-            canvas.addEventListener("pointermove", (e) => {
-                if (!dragging) return;
-                const { px, py } = getPointerPos(e);
+            function resetJoystick() {
+                joy.active = false;
+                joy.pointerId = null;
+                joy.dx = 0;
+                joy.dy = 0;
+                joy.knobX = joy.baseX;
+                joy.knobY = joy.baseY;
+            }
 
-                x = px - dragOffsetX;
-                y = py - dragOffsetY;
-                clampPlayer();
-            });
+            function inJoystickArea(px, py) {
+                const d = Math.hypot(px - joy.baseX, py - joy.baseY);
+                // Slightly larger than base so it’s easy to grab
+                return d <= joy.baseR + 18;
+            }
 
-            canvas.addEventListener("pointerup", (e) => {
-                dragging = false;
-                try {
-                    canvas.releasePointerCapture(e.pointerId);
-                } catch {}
-            });
-
-            canvas.addEventListener("pointercancel", () => {
-                dragging = false;
+            // Handle resize: keep joystick pinned to bottom-left
+            window.addEventListener("resize", () => {
+                resize();
+                layoutJoystick();
+                if (!joy.active) resetJoystick();
             });
 
             // --- ENEMIES (RED CIRCLES) ---
-            const enemyCount = 10;
+            const enemyCount = 5;
             const enemies = [];
             const r = 18;
 
@@ -124,30 +138,25 @@
 
             function resetEnemies() {
                 enemies.length = 0;
-
                 for (let i = 0; i < enemyCount; i++) {
                     let ex, ey;
-
-                    // Spawn not overlapping each other and not too close to player.
                     for (let tries = 0; tries < 200; tries++) {
                         ex = rand(r, canvas.width - r);
                         ey = rand(r, canvas.height - r);
 
-                        const playerDx = ex - (x + size / 2);
-                        const playerDy = ey - (y + size / 2);
-                        const farFromPlayer =
-                            Math.hypot(playerDx, playerDy) > 160;
+                        const pdx = ex - (x + size / 2);
+                        const pdy = ey - (y + size / 2);
+                        const farFromPlayer = Math.hypot(pdx, pdy) > 160;
 
                         let overlaps = false;
                         for (const o of enemies) {
-                            const dx = ex - o.x;
-                            const dy = ey - o.y;
+                            const dx = ex - o.x,
+                                dy = ey - o.y;
                             if (dx * dx + dy * dy < 2 * r * (2 * r)) {
                                 overlaps = true;
                                 break;
                             }
                         }
-
                         if (farFromPlayer && !overlaps) break;
                     }
 
@@ -158,6 +167,44 @@
 
                     enemies.push({ x: ex, y: ey, vx, vy, r });
                 }
+            }
+
+            function resolveCircleCollision(a, b) {
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                const minDist = a.r + b.r;
+                if (dist === 0 || dist >= minDist) return;
+
+                const nx = dx / dist,
+                    ny = dy / dist;
+                const overlap = minDist - dist;
+
+                a.x -= nx * (overlap / 2);
+                a.y -= ny * (overlap / 2);
+                b.x += nx * (overlap / 2);
+                b.y += ny * (overlap / 2);
+
+                const rvx = b.vx - a.vx;
+                const rvy = b.vy - a.vy;
+                const velAlongNormal = rvx * nx + rvy * ny;
+                if (velAlongNormal > 0) return;
+
+                const restitution = 1.0;
+                const j = (-(1 + restitution) * velAlongNormal) / 2;
+
+                const impulseX = j * nx;
+                const impulseY = j * ny;
+                a.vx -= impulseX;
+                a.vy -= impulseY;
+                b.vx += impulseX;
+                b.vy += impulseY;
+
+                const damp = 0.999;
+                a.vx *= damp;
+                a.vy *= damp;
+                b.vx *= damp;
+                b.vy *= damp;
             }
 
             // --- TIMER ---
@@ -172,72 +219,127 @@
 
                 x = 100;
                 y = 100;
+                clampPlayer();
                 runStart = now;
                 resetEnemies();
+                // keep joystick where it is; but if not active, recenter
+                if (!joy.active) resetJoystick();
             }
 
             resetEnemies();
+            resetJoystick();
 
-            // --- PHYSICS: CIRCLE-CIRCLE COLLISION (equal mass) ---
-            function resolveCircleCollision(a, b) {
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const dist = Math.hypot(dx, dy);
-                const minDist = a.r + b.r;
+            // --- POINTER INPUT ROUTING: joystick vs dragging square ---
+            canvas.addEventListener("pointerdown", (e) => {
+                const { px, py } = getPointerPos(e);
 
-                if (dist === 0 || dist >= minDist) return;
+                // If touch/click is in joystick area, start joystick control
+                if (inJoystickArea(px, py)) {
+                    joy.active = true;
+                    joy.pointerId = e.pointerId;
+                    canvas.setPointerCapture(e.pointerId);
 
-                // Separate
-                const nx = dx / dist;
-                const ny = dy / dist;
-                const overlap = minDist - dist;
+                    // Update immediately so it feels responsive
+                    const dx = px - joy.baseX;
+                    const dy = py - joy.baseY;
+                    const max = joy.baseR;
+                    const len = Math.hypot(dx, dy) || 1;
 
-                a.x -= nx * (overlap / 2);
-                a.y -= ny * (overlap / 2);
-                b.x += nx * (overlap / 2);
-                b.y += ny * (overlap / 2);
+                    const clampedLen = Math.min(len, max);
+                    const nx = dx / len;
+                    const ny = dy / len;
 
-                // Relative velocity
-                const rvx = b.vx - a.vx;
-                const rvy = b.vy - a.vy;
-                const velAlongNormal = rvx * nx + rvy * ny;
+                    joy.knobX = joy.baseX + nx * clampedLen;
+                    joy.knobY = joy.baseY + ny * clampedLen;
 
-                if (velAlongNormal > 0) return;
+                    joy.dx = (nx * clampedLen) / max; // -1..1
+                    joy.dy = (ny * clampedLen) / max; // -1..1
+                    return;
+                }
 
-                const restitution = 1.0;
-                const j = (-(1 + restitution) * velAlongNormal) / 2;
+                // Otherwise try dragging square
+                if (pointInSquare(px, py) || nearSquare(px, py)) {
+                    draggingSquare = true;
+                    dragOffsetX = px - x;
+                    dragOffsetY = py - y;
+                    canvas.setPointerCapture(e.pointerId);
+                }
+            });
 
-                const impulseX = j * nx;
-                const impulseY = j * ny;
+            canvas.addEventListener("pointermove", (e) => {
+                const { px, py } = getPointerPos(e);
 
-                a.vx -= impulseX;
-                a.vy -= impulseY;
-                b.vx += impulseX;
-                b.vy += impulseY;
+                // Joystick movement (only for the pointer that started it)
+                if (joy.active && e.pointerId === joy.pointerId) {
+                    const dx = px - joy.baseX;
+                    const dy = py - joy.baseY;
+                    const max = joy.baseR;
 
-                const damp = 0.999;
-                a.vx *= damp;
-                a.vy *= damp;
-                b.vx *= damp;
-                b.vy *= damp;
-            }
+                    const len = Math.hypot(dx, dy) || 1;
+                    const clampedLen = Math.min(len, max);
+                    const nx = dx / len;
+                    const ny = dy / len;
 
+                    joy.knobX = joy.baseX + nx * clampedLen;
+                    joy.knobY = joy.baseY + ny * clampedLen;
+
+                    joy.dx = (nx * clampedLen) / max;
+                    joy.dy = (ny * clampedLen) / max;
+                    return;
+                }
+
+                // Dragging square
+                if (draggingSquare) {
+                    x = px - dragOffsetX;
+                    y = py - dragOffsetY;
+                    clampPlayer();
+                }
+            });
+
+            canvas.addEventListener("pointerup", (e) => {
+                if (joy.active && e.pointerId === joy.pointerId) {
+                    resetJoystick();
+                    try {
+                        canvas.releasePointerCapture(e.pointerId);
+                    } catch {}
+                    return;
+                }
+                draggingSquare = false;
+                try {
+                    canvas.releasePointerCapture(e.pointerId);
+                } catch {}
+            });
+
+            canvas.addEventListener("pointercancel", (e) => {
+                if (joy.active && e.pointerId === joy.pointerId)
+                    resetJoystick();
+                draggingSquare = false;
+            });
+
+            // --- GAME LOOP ---
             function update() {
-                // Keyboard only when not dragging (so it doesn't fight your finger)
-                if (!dragging) {
-                    if (keys["ArrowUp"]) y -= speed;
-                    if (keys["ArrowDown"]) y += speed;
-                    if (keys["ArrowLeft"]) x -= speed;
-                    if (keys["ArrowRight"]) x += speed;
+                // Player movement priority:
+                // 1) joystick if active
+                // 2) dragging square
+                // 3) keyboard
+                if (joy.active) {
+                    // dy positive means down on canvas, so it feels natural
+                    x += joy.dx * joystickMaxSpeed;
+                    y += joy.dy * joystickMaxSpeed;
+                    clampPlayer();
+                } else if (!draggingSquare) {
+                    if (keys["ArrowUp"]) y -= keyboardSpeed;
+                    if (keys["ArrowDown"]) y += keyboardSpeed;
+                    if (keys["ArrowLeft"]) x -= keyboardSpeed;
+                    if (keys["ArrowRight"]) x += keyboardSpeed;
                     clampPlayer();
                 }
 
-                // Move enemies
+                // Enemies move
                 for (const e of enemies) {
                     e.x += e.vx;
                     e.y += e.vy;
 
-                    // Wall bounce
                     if (e.x - e.r <= 0) {
                         e.x = e.r;
                         e.vx *= -1;
@@ -272,10 +374,35 @@
                 }
             }
 
+            function drawJoystick() {
+                // Only draw joystick when on a touch device OR when active
+                // (You can remove this condition if you always want it visible)
+                const likelyTouch =
+                    navigator.maxTouchPoints && navigator.maxTouchPoints > 0;
+                if (!likelyTouch && !joy.active) return;
+
+                ctx.save();
+
+                // base
+                ctx.globalAlpha = 0.35;
+                ctx.fillStyle = "black";
+                ctx.beginPath();
+                ctx.arc(joy.baseX, joy.baseY, joy.baseR, 0, Math.PI * 2);
+                ctx.fill();
+
+                // knob
+                ctx.globalAlpha = 0.6;
+                ctx.beginPath();
+                ctx.arc(joy.knobX, joy.knobY, joy.knobR, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+
             function draw(now) {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                // Enemies
+                // enemies
                 ctx.fillStyle = "red";
                 for (const e of enemies) {
                     ctx.beginPath();
@@ -283,7 +410,7 @@
                     ctx.fill();
                 }
 
-                // Player
+                // player
                 ctx.fillStyle = "blue";
                 ctx.fillRect(x, y, size, size);
 
@@ -295,10 +422,13 @@
                 ctx.fillText(`Last: ${lastTime.toFixed(2)}s`, 12, 40);
                 ctx.fillText(`Best: ${bestTime.toFixed(2)}s`, 12, 60);
                 ctx.fillText(
-                    `Drag or use arrow keys. Avoid red balls.`,
+                    `Drag square, joystick, or arrow keys. Avoid red balls.`,
                     12,
                     84,
                 );
+
+                // joystick overlay
+                drawJoystick();
             }
 
             function loop(now) {
