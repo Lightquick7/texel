@@ -1,9 +1,132 @@
 <!doctype html>
-<html>
+<html lang="en">
     <head>
-        <title>Hello World</title>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Blue Square</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                height: 100%;
+            }
+            canvas {
+                display: block;
+                background: #f0f0f0;
+                touch-action: none; /* important for touch dragging */
+            }
+        </style>
     </head>
     <body>
-        <h1>Hello, world!</h1>
+        <canvas id="game"></canvas>
+
+        <script>
+            // Wait until the HTML is fully loaded so the canvas exists
+            window.addEventListener("load", () => {
+                const canvas = document.getElementById("game");
+                const ctx = canvas.getContext("2d");
+
+                function resize() {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                }
+                resize();
+                window.addEventListener("resize", resize);
+
+                const size = 55;
+                let x = 100;
+                let y = 100;
+                const speed = 5;
+
+                const keys = {};
+                window.addEventListener("keydown", (e) => (keys[e.key] = true));
+                window.addEventListener("keyup", (e) => (keys[e.key] = false));
+
+                let dragging = false;
+                let offsetX = 0;
+                let offsetY = 0;
+
+                function isInsideSquare(px, py) {
+                    return (
+                        px >= x && px <= x + size && py >= y && py <= y + size
+                    );
+                }
+
+                // Mouse
+                canvas.addEventListener("mousedown", (e) => {
+                    if (isInsideSquare(e.clientX, e.clientY)) {
+                        dragging = true;
+                        offsetX = e.clientX - x;
+                        offsetY = e.clientY - y;
+                    }
+                });
+
+                canvas.addEventListener("mousemove", (e) => {
+                    if (dragging) {
+                        x = e.clientX - offsetX;
+                        y = e.clientY - offsetY;
+                    }
+                });
+
+                window.addEventListener("mouseup", () => {
+                    dragging = false;
+                });
+
+                // Touch
+                canvas.addEventListener("touchstart", (e) => {
+                    const t = e.touches[0];
+                    if (isInsideSquare(t.clientX, t.clientY)) {
+                        dragging = true;
+                        offsetX = t.clientX - x;
+                        offsetY = t.clientY - y;
+                    }
+                });
+
+                canvas.addEventListener(
+                    "touchmove",
+                    (e) => {
+                        if (dragging) {
+                            const t = e.touches[0];
+                            x = t.clientX - offsetX;
+                            y = t.clientY - offsetY;
+                        }
+                        e.preventDefault();
+                    },
+                    { passive: false },
+                );
+
+                window.addEventListener("touchend", () => {
+                    dragging = false;
+                });
+
+                function update() {
+                    if (!dragging) {
+                        if (keys["ArrowUp"]) y -= speed;
+                        if (keys["ArrowDown"]) y += speed;
+                        if (keys["ArrowLeft"]) x -= speed;
+                        if (keys["ArrowRight"]) x += speed;
+                    }
+
+                    x = Math.max(0, Math.min(x, canvas.width - size));
+                    y = Math.max(0, Math.min(y, canvas.height - size));
+                }
+
+                function draw() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = "blue";
+                    ctx.fillRect(x, y, size, size);
+                }
+
+                function loop() {
+                    update();
+                    draw();
+                    requestAnimationFrame(loop);
+                }
+
+                loop();
+            });
+        </script>
     </body>
 </html>
