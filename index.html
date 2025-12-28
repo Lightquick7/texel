@@ -70,7 +70,7 @@
             function nearSquare(px, py) {
                 const cx = x + size / 2;
                 const cy = y + size / 2;
-                return Math.hypot(px - cx, py - cy) <= 70;
+                return Math.hypot(px - cx, py - cy) <= 200;
             }
 
             // --- JOYSTICK (bottom-left) ---
@@ -324,11 +324,8 @@
                 // 3) keyboard
                 if (joy.active) {
                     // dy positive means down on canvas, so it feels natural
-                    const len = Math.hypot(joy.dx, joy.dy);
-                    if (len > 0) {
-                        x += (joy.dx / len) * joystickMaxSpeed;
-                        y += (joy.dy / len) * joystickMaxSpeed;
-                    }
+                    x += joy.dx * joystickMaxSpeed;
+                    y += joy.dy * joystickMaxSpeed;
                     clampPlayer();
                 } else if (!draggingSquare) {
                     if (keys["ArrowUp"]) y -= keyboardSpeed;
