@@ -26,6 +26,7 @@
         <script>
             const canvas = document.getElementById("game");
             const ctx = canvas.getContext("2d");
+            const IS_MOBILE = window.matchMedia("(pointer: coarse)").matches;
 
             function resize() {
                 canvas.width = window.innerWidth;
@@ -35,7 +36,7 @@
             resize();
 
             // --- PLAYER (BLUE SQUARE) ---
-            const size = 50;
+            const size = IS_MOBILE ? 20 : 30;
             let x = 100,
                 y = 100;
             const speed = 5;
@@ -105,7 +106,7 @@
 
             // --- ENEMIES (RED CIRCLES) ---
             const enemies = [];
-            const BALL_RADIUS = 25; // you asked: ball size to 25
+            const BALL_RADIUS = IS_MOBILE ? 15 : 25;
             const INITIAL_BALLS = 5;
 
             function rand(min, max) {
