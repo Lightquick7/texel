@@ -1,21 +1,21 @@
 <!doctype html>
 <html lang="en">
     <head>
-        <meta charset="UTF-8" />
+        <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Blue Square</title>
+        <title>Texel - Dodge</title>
         <style>
             html,
             body {
                 margin: 0;
-                padding: 0;
-                overflow: hidden;
                 height: 100%;
+                overflow: hidden;
+                background: #f0f0f0;
             }
             canvas {
                 display: block;
-                background: #f0f0f0;
-                touch-action: none; /* important for touch dragging */
+                width: 100vw;
+                height: 100vh;
             }
         </style>
     </head>
@@ -23,110 +23,230 @@
         <canvas id="game"></canvas>
 
         <script>
-            // Wait until the HTML is fully loaded so the canvas exists
-            window.addEventListener("load", () => {
-                const canvas = document.getElementById("game");
-                const ctx = canvas.getContext("2d");
+            const canvas = document.getElementById("game");
+            const ctx = canvas.getContext("2d");
 
-                function resize() {
-                    canvas.width = window.innerWidth;
-                    canvas.height = window.innerHeight;
-                }
-                resize();
-                window.addEventListener("resize", resize);
+            function resize() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            window.addEventListener("resize", resize);
+            resize();
 
-                const size = 50;
-                let x = 200;
-                let y = 200;
-                const speed = 5;
+            // --- PLAYER (BLUE SQUARE) ---
+            const size = 50;
+            let x = 100,
+                y = 100;
+            const speed = 5;
+            const keys = {};
+            window.addEventListener("keydown", (e) => (keys[e.key] = true));
+            window.addEventListener("keyup", (e) => (keys[e.key] = false));
 
-                const keys = {};
-                window.addEventListener("keydown", (e) => (keys[e.key] = true));
-                window.addEventListener("keyup", (e) => (keys[e.key] = false));
+            // --- ENEMIES (RED CIRCLES) ---
+            const enemyCount = 5;
+            const enemies = [];
+            const r = 18;
 
-                let dragging = false;
-                let offsetX = 0;
-                let offsetY = 0;
+            function rand(min, max) {
+                return Math.random() * (max - min) + min;
+            }
 
-                function isInsideSquare(px, py) {
-                    return (
-                        px >= x && px <= x + size && py >= y && py <= y + size
-                    );
-                }
+            function circleRectCollides(cx, cy, cr, rx, ry, rw, rh) {
+                const closestX = Math.max(rx, Math.min(cx, rx + rw));
+                const closestY = Math.max(ry, Math.min(cy, ry + rh));
+                const dx = cx - closestX;
+                const dy = cy - closestY;
+                return dx * dx + dy * dy <= cr * cr;
+            }
 
-                // Mouse
-                canvas.addEventListener("mousedown", (e) => {
-                    if (isInsideSquare(e.clientX, e.clientY)) {
-                        dragging = true;
-                        offsetX = e.clientX - x;
-                        offsetY = e.clientY - y;
-                    }
-                });
+            function resetEnemies() {
+                enemies.length = 0;
 
-                canvas.addEventListener("mousemove", (e) => {
-                    if (dragging) {
-                        x = e.clientX - offsetX;
-                        y = e.clientY - offsetY;
-                    }
-                });
+                for (let i = 0; i < enemyCount; i++) {
+                    let ex, ey;
 
-                window.addEventListener("mouseup", () => {
-                    dragging = false;
-                });
+                    // Try to spawn circles not overlapping each other and not too close to the player.
+                    for (let tries = 0; tries < 200; tries++) {
+                        ex = rand(r, canvas.width - r);
+                        ey = rand(r, canvas.height - r);
 
-                // Touch
-                canvas.addEventListener("touchstart", (e) => {
-                    const t = e.touches[0];
-                    if (isInsideSquare(t.clientX, t.clientY)) {
-                        dragging = true;
-                        offsetX = t.clientX - x;
-                        offsetY = t.clientY - y;
-                    }
-                });
+                        const playerDx = ex - (x + size / 2);
+                        const playerDy = ey - (y + size / 2);
+                        const farFromPlayer =
+                            Math.hypot(playerDx, playerDy) > 160;
 
-                canvas.addEventListener(
-                    "touchmove",
-                    (e) => {
-                        if (dragging) {
-                            const t = e.touches[0];
-                            x = t.clientX - offsetX;
-                            y = t.clientY - offsetY;
+                        let overlaps = false;
+                        for (const o of enemies) {
+                            const dx = ex - o.x;
+                            const dy = ey - o.y;
+                            if (dx * dx + dy * dy < 2 * r * (2 * r)) {
+                                overlaps = true;
+                                break;
+                            }
                         }
-                        e.preventDefault();
-                    },
-                    { passive: false },
-                );
 
-                window.addEventListener("touchend", () => {
-                    dragging = false;
-                });
-
-                function update() {
-                    if (!dragging) {
-                        if (keys["ArrowUp"]) y -= speed;
-                        if (keys["ArrowDown"]) y += speed;
-                        if (keys["ArrowLeft"]) x -= speed;
-                        if (keys["ArrowRight"]) x += speed;
+                        if (farFromPlayer && !overlaps) break;
                     }
 
-                    x = Math.max(0, Math.min(x, canvas.width - size));
-                    y = Math.max(0, Math.min(y, canvas.height - size));
+                    let vx = rand(-4, 4);
+                    let vy = rand(-4, 4);
+                    if (Math.abs(vx) < 1.5) vx = (vx < 0 ? -1 : 1) * 2.5;
+                    if (Math.abs(vy) < 1.5) vy = (vy < 0 ? -1 : 1) * 2.5;
+
+                    enemies.push({ x: ex, y: ey, vx, vy, r });
+                }
+            }
+
+            // --- TIMER ---
+            let runStart = performance.now();
+            let lastTime = 0;
+            let bestTime = 0;
+
+            function restartRun() {
+                const now = performance.now();
+                lastTime = (now - runStart) / 1000;
+                bestTime = Math.max(bestTime, lastTime);
+
+                x = 100;
+                y = 100;
+                runStart = now;
+                resetEnemies();
+            }
+
+            resetEnemies();
+
+            // --- PHYSICS: CIRCLE-CIRCLE COLLISION (equal mass, elastic-ish) ---
+            function resolveCircleCollision(a, b) {
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                const minDist = a.r + b.r;
+
+                if (dist === 0 || dist >= minDist) return;
+
+                // Push them apart so they don't stick
+                const nx = dx / dist;
+                const ny = dy / dist;
+                const overlap = minDist - dist;
+
+                // Split the correction between both circles
+                a.x -= nx * (overlap / 2);
+                a.y -= ny * (overlap / 2);
+                b.x += nx * (overlap / 2);
+                b.y += ny * (overlap / 2);
+
+                // Relative velocity along the normal
+                const rvx = b.vx - a.vx;
+                const rvy = b.vy - a.vy;
+                const velAlongNormal = rvx * nx + rvy * ny;
+
+                // If they're moving apart after separation, don't apply impulse
+                if (velAlongNormal > 0) return;
+
+                // Elastic collision impulse (restitution 1.0)
+                const restitution = 1.0;
+                const j = (-(1 + restitution) * velAlongNormal) / 2; // / (1/m + 1/m) with m=1 => /2
+
+                const impulseX = j * nx;
+                const impulseY = j * ny;
+
+                a.vx -= impulseX;
+                a.vy -= impulseY;
+                b.vx += impulseX;
+                b.vy += impulseY;
+
+                // Tiny damping to prevent infinite jitter
+                const damp = 0.999;
+                a.vx *= damp;
+                a.vy *= damp;
+                b.vx *= damp;
+                b.vy *= damp;
+            }
+
+            function clampPlayer() {
+                x = Math.max(0, Math.min(canvas.width - size, x));
+                y = Math.max(0, Math.min(canvas.height - size, y));
+            }
+
+            function update() {
+                // Move player
+                if (keys["ArrowUp"]) y -= speed;
+                if (keys["ArrowDown"]) y += speed;
+                if (keys["ArrowLeft"]) x -= speed;
+                if (keys["ArrowRight"]) x += speed;
+                clampPlayer();
+
+                // Move enemies
+                for (const e of enemies) {
+                    e.x += e.vx;
+                    e.y += e.vy;
+
+                    // Wall bounce
+                    if (e.x - e.r <= 0) {
+                        e.x = e.r;
+                        e.vx *= -1;
+                    }
+                    if (e.x + e.r >= canvas.width) {
+                        e.x = canvas.width - e.r;
+                        e.vx *= -1;
+                    }
+                    if (e.y - e.r <= 0) {
+                        e.y = e.r;
+                        e.vy *= -1;
+                    }
+                    if (e.y + e.r >= canvas.height) {
+                        e.y = canvas.height - e.r;
+                        e.vy *= -1;
+                    }
                 }
 
-                function draw() {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.fillStyle = "blue";
-                    ctx.fillRect(x, y, size, size);
+                // Circle-circle collisions (pairwise)
+                for (let i = 0; i < enemies.length; i++) {
+                    for (let j = i + 1; j < enemies.length; j++) {
+                        resolveCircleCollision(enemies[i], enemies[j]);
+                    }
                 }
 
-                function loop() {
-                    update();
-                    draw();
-                    requestAnimationFrame(loop);
+                // If any enemy hits player -> restart
+                for (const e of enemies) {
+                    if (circleRectCollides(e.x, e.y, e.r, x, y, size, size)) {
+                        restartRun();
+                        break;
+                    }
+                }
+            }
+
+            function draw(now) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Enemies
+                ctx.fillStyle = "red";
+                for (const e of enemies) {
+                    ctx.beginPath();
+                    ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+                    ctx.fill();
                 }
 
-                loop();
-            });
+                // Player
+                ctx.fillStyle = "blue";
+                ctx.fillRect(x, y, size, size);
+
+                // HUD
+                const t = (now - runStart) / 1000;
+                ctx.fillStyle = "rgba(0,0,0,0.75)";
+                ctx.font = "16px sans-serif";
+                ctx.fillText(`Time: ${t.toFixed(2)}s`, 12, 20);
+                ctx.fillText(`Last: ${lastTime.toFixed(2)}s`, 12, 40);
+                ctx.fillText(`Best: ${bestTime.toFixed(2)}s`, 12, 60);
+                ctx.fillText(`Arrow keys. Avoid red balls.`, 12, 84);
+            }
+
+            function loop(now) {
+                update();
+                draw(now);
+                requestAnimationFrame(loop);
+            }
+            requestAnimationFrame(loop);
         </script>
     </body>
 </html>
