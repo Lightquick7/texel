@@ -324,8 +324,11 @@
                 // 3) keyboard
                 if (joy.active) {
                     // dy positive means down on canvas, so it feels natural
-                    x += joy.dx * joystickMaxSpeed;
-                    y += joy.dy * joystickMaxSpeed;
+                    const len = Math.hypot(joy.dx, joy.dy);
+                    if (len > 0) {
+                        x += (joy.dx / len) * joystickMaxSpeed;
+                        y += (joy.dy / len) * joystickMaxSpeed;
+                    }
                     clampPlayer();
                 } else if (!draggingSquare) {
                     if (keys["ArrowUp"]) y -= keyboardSpeed;
